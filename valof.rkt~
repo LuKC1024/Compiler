@@ -1,0 +1,114 @@
+#lang racket
+
+; The most basic version of valof, good for factorial
+
+
+; environment (represented/w hash)
+
+(define (empty-env) (hash))
+(define (extend-env x v env) (hash-set env x v))
+(define (apply-env env x) (hash-ref env x))
+
+; closure (represented/w procedure)
+
+(define (make-closure env x body)
+  (λ (arg)
+    (valof body (extend-env x arg env))))
+
+(define (apply-closure clos arg)
+  (clos arg))
+
+
+(define (valof exp env)
+  (match exp
+    [`,y #:when (symbol? y) (apply-env env y)]
+    [`,n #:when (number? n) n]
+    [`,b #:when (boolean? b) b]
+    [`(zero? ,n) (zero? (valof n env))]
+    [`(sub1 ,n) (sub1 (valof n env))]
+    [`(* ,n ,m) (* (valof n env) (valof m env))]
+    [`(if ,cnd ,thn ,els) (if (valof cnd env)
+                              (valof thn env)
+                              (valof els env))]
+    [`(λ (,x) ,body) (make-closure env x body)]
+    [`(,rator ,rand) (apply-closure (valof rator env)
+                                    (valof rand env))]))
+
+(define (compile exp senv)
+  (match exp
+    [`,y #:when (symbol? y) (mk-var (index-of senv y))]
+    [`,n #:when (number? n) (mk-num n)]
+    [`,b #:when (boolean? b) (mk-bool b)]
+    [`(zero? ,n) (mk-zero? (compile n senv))]
+    [`(sub1 ,n) (mk-sub1 (compile n senv))]
+    [`(* ,n ,m) (mk-mult (compile n senv) (compile m senv))]
+    [`(if ,cnd ,thn ,els) (mk-if (compile cnd senv)
+                                 (compile thn senv)
+                                 (compile els senv))]
+    [`(λ (,x) ,body)
+     (mk-lambda (compile body `(,x . ,senv)))]
+    [`(,rator ,rand) (mk-apply (compile rator senv)
+                               (compile rand senv))]))
+
+
+(define (mk-var i)
+  `(var ,i))
+(define (mk-num n)
+  `(const ,n))
+(define (mk-bool b)
+  `(const ,b))
+(define (mk-zero? n^)
+  `(zero? ,n^))
+(define (mk-sub1 n^)
+  `(sub1 ,n^))
+(define (mk-mult n^ m^)
+  `(* ,n^ ,m^))
+(define (mk-if cnd^ thn^ els^)
+  `(if ,cnd^ ,thn^ ,els^))
+(define (mk-lambda body^)
+  `(lambda ,body^))
+(define (mk-apply rator^ rand^)
+  `(,rator^ ,rand^))
+
+(define (run e env)
+  (match e
+    [`(var ,i) (list-ref env i)]
+    [`(const ,n) n]
+    [`(zero? ,n^) (zero? (run n^ env))]
+    [`(sub1 ,n^) (sub1 (run n^ env))]
+    [`(* ,n^ ,m^) (* (run n^ env) (run m^ env))]
+    [`(if ,cnd^ ,thn^ ,els^) (if (run cnd^ env)
+                                 (run thn^ env)
+                                 (run els^ env))]
+    [`(lambda ,body^) (λ (arg) (run body^ (cons arg env)))]
+    [`(,rator^ ,rand^) (apply-closure (run rator^ env)
+                                      (run rand^ env))]))
+
+; test case - (factorial 5)
+(valof '((λ (fact) ((fact fact) 5))
+         (λ (fact)
+           (λ (n)
+             (if (zero? n) 1
+                 (if (zero? (sub1 n)) 1
+                     (* ((fact fact) (sub1 n)) n))))))
+       (empty-env))
+
+(run (compile
+      '((λ (fact) ((fact fact) 5))
+        (λ (fact)
+          (λ (n)
+            (if (zero? n) 1
+                (if (zero? (sub1 n)) 1
+                    (* ((fact fact) (sub1 n)) n))))))
+      '())
+  '())
+
+(let ([fact (λ (fact)
+              (λ (n)
+                (if (zero? n)
+                    1
+                    (if (zero? (sub1 n))
+                        1
+                        (* ((fact fact) (sub1 n))
+                           n)))))])
+  ((fact fact) 5))
