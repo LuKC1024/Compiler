@@ -1,15 +1,7 @@
 #lang racket
-
-; The most basic version of valof, good for factorial
-
+(require "environments.rkt")
 
 ; environment (represented/w hash)
-
-(define (empty-env) '())
-(define (extend-env x v env)
-  (cons (cons x v) env))
-(define (apply-env env x)
-  (cdr (assv x env)))
 
 (define-syntax letM
   (syntax-rules ()
@@ -144,6 +136,8 @@
         (return `(,x ,y))))))
 
 ;; CPSed interpreter
+
+#;
 (begin
   
   (define (return v)
@@ -155,11 +149,13 @@
       (mv (λ (v) ((f v) k)))))
 
   (define (run mv)
-    (mv (λ (v) v)))
+    (let ([kx (gensym)])
+      (mv (λ (v) v))))
 
-  (define (get/cc)
+  (define (mcall/cc f)
     (λ (k)
-      (k k)))
+      (let ([k-as-v (λ (v) (λ (k^) (k v)))])
+        ((f k-as-v) k))))
 
   (define (δ-zero? n)
     (return (zero? n)))
@@ -168,48 +164,11 @@
   (define (δ-* n m)
     (return (* n m)))
   
-  (define (δ-call/cc v)
-    #;
-    (letM ([k (get/cc)])
-      (apply-closure v (λ (u) (λ (k^) (k u)))))
-    #;
-    (mbind (get/cc)
-           (λ (k)
-             (apply-closure v (λ (u) (λ (k^) (k u))))))
-    #;
-    (λ (k)
-      ((get/cc)
-       (λ (v)
-         (((λ (k)
-             (apply-closure v (λ (u) (λ (k^) (k u)))))
-           v)
-          k))))
-    #;
-    (λ (k)
-      ((get/cc)
-       (λ (v)
-         ((apply-closure v (λ (u) (λ (k^) (v u))))
-          k))))
-    #;
-    (λ (k)
-      ((λ (f)
-         (let ([k (f (λ (_) (λ (k) k)))])
-           (f k)))
-       (λ (v)
-         ((apply-closure v (λ (u) (λ (k^) (v u))))
-          k))))
-    #;
-    (λ (k)
-      (let ([f (λ (v)
-                 ((apply-closure v (λ (u) (λ (k^) (v u))))
-                  k))]))
-      ((λ (f)
-         (let ([k (f (λ (_) (λ (k) k)))])
-           (f k)))
-       ))    
-    (λ (k)
-      ((apply-closure v (λ (u) (λ (k^) (k u))))
-       k)))
+  (define (δ-call/cc clos)
+    (mcall/cc
+     (λ (klos)
+       (apply-closure clos klos))))
+  
   (define (δ-if b k1 k2)
     (if b (k1) (k2)))
   
@@ -220,6 +179,65 @@
 
   (define (apply-closure clos arg)
     (clos arg)))
+
+;; CPSer
+(begin
+  
+  (define (return v)
+    (λ (k)
+      (k v)))
+  
+  (define (mbind mv f)
+    (λ (k)
+      (mv (λ (v) ((f v) k)))))
+
+  (define (run mv)
+    (let ([kx (gensym)])
+      (mv (λ (v) v))))
+
+  (define (mcall/cc f)
+    (λ (k)
+      (let ([k-as-v `(λ (v) (λ (k^) ,(k 'v)))])
+        ((f k-as-v) k))))
+
+  (define (δ-zero? n)
+    (return `(zero? ,n)))
+  (define (δ-sub1 n)
+    (return `(sub1 ,n)))
+  (define (δ-* n m)
+    (return `(* ,n ,m)))
+  
+  (define (δ-call/cc clos)
+    (mcall/cc
+     (λ (klos)
+       (apply-closure clos klos))))
+  
+  (define (δ-if b k1 k2)
+    #;(if b (k1) (k2))
+    #;(λ (k) (if b ((k1) k) ((k2) k)))
+    (λ (k) `(if ,b ,((k1) k) ,((k2) k))))
+  
+  (define (make-closure env x body)
+    #;(return (λ (arg)
+                (valof body (extend-env x arg env))))
+    #;(return (λ (arg)
+                (λ (k)
+                  ((valof body (extend-env x arg env)) k))))
+    #;(return (λ (arg)
+                (λ (k)
+                  ((valof body (extend-env x arg env))
+                   (λ (v) (k v))))))
+    (let ([arg (gensym)])
+      (return `(λ (,arg)
+                 (λ (k)
+                   ,((valof body (extend-env x arg env))
+                     (λ (v) `(k ,v))))))))
+
+  (define (apply-closure clos arg)
+    #;(clos arg)
+    #;(λ (k) ((clos arg) k))
+    #;(λ (k) ((clos arg) (λ (v) (k v))))
+    (λ (k) `((,clos ,arg) (λ (v) ,(k 'v))))))
 
 (define (valof exp env)
   (match exp
