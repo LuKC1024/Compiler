@@ -149,8 +149,7 @@
       (mv (λ (v) ((f v) k)))))
 
   (define (run mv)
-    (let ([kx (gensym)])
-      (mv (λ (v) v))))
+    (mv (λ (v) v)))
 
   (define (mcall/cc f)
     (λ (k)
@@ -181,6 +180,7 @@
     (clos arg)))
 
 ;; CPSer
+
 (begin
   
   (define (return v)
@@ -192,8 +192,7 @@
       (mv (λ (v) ((f v) k)))))
 
   (define (run mv)
-    (let ([kx (gensym)])
-      (mv (λ (v) v))))
+    (mv (λ (v) v)))
 
   (define (mcall/cc f)
     (λ (k)
@@ -227,7 +226,7 @@
                 (λ (k)
                   ((valof body (extend-env x arg env))
                    (λ (v) (k v))))))
-    (let ([arg (gensym)])
+    (let ([arg (gensym 'arg)])
       (return `(λ (,arg)
                  (λ (k)
                    ,((valof body (extend-env x arg env))
@@ -237,7 +236,8 @@
     #;(clos arg)
     #;(λ (k) ((clos arg) k))
     #;(λ (k) ((clos arg) (λ (v) (k v))))
-    (λ (k) `((,clos ,arg) (λ (v) ,(k 'v))))))
+    (let ([v (gensym 'v)])
+      (λ (k) `((,clos ,arg) (λ (,v) ,(k v)))))))
 
 (define (valof exp env)
   (match exp
