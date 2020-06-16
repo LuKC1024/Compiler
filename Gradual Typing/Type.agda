@@ -21,18 +21,18 @@ infix 100 _⊗_
 infix 100 _⊕_
 
 data BaseTypeCode : Set where
-  unit : BaseTypeCode
-  nat  : BaseTypeCode
+  `unit : BaseTypeCode
+  `nat  : BaseTypeCode
 
 BaseValue : BaseTypeCode → Set
-BaseValue unit = ⊤
-BaseValue nat = ℕ
+BaseValue `unit = ⊤
+BaseValue `nat = ℕ
 
 _≟btc_ : (b1 b2 : BaseTypeCode) → Dec (b1 ≡ b2)
-unit ≟btc unit = yes refl
-unit ≟btc nat = no (λ ())
-nat ≟btc unit = no (λ ())
-nat ≟btc nat = yes refl
+`unit ≟btc `unit = yes refl
+`unit ≟btc `nat = no (λ ())
+`nat ≟btc `unit = no (λ ())
+`nat ≟btc `nat = yes refl
 
 data TypeOp : Set where
   `_ : (b : BaseTypeCode) → TypeOp
@@ -78,8 +78,10 @@ data Type where
   *  : Type
   `_ : (P : PreType) → Type
 
+pattern base A = (` A , [])
 
-pattern ′_  b   = (` b) , []
+pattern unit   = (` `unit) , []
+pattern nat    = (` `nat)  , []
 pattern _⇒_ S T = `⇒ , (S ∷ T ∷ [])
 pattern _⊗_ S T = `⊗ , (S ∷ T ∷ [])
 pattern _⊕_ S T = `⊕ , (S ∷ T ∷ [])
@@ -129,7 +131,8 @@ T~* {` P} = P* P
 
 ~refl : ∀ T → T ~ T
 ~refl * = **
-~refl (` (′ b)) = PP (` b) []
+~refl (` unit) = PP (` `unit) []
+~refl (` nat ) = PP (` `nat) []
 ~refl (` S ⊗ T) = PP `⊗ (~refl S ∷ (~refl T ∷ []))
 ~refl (` S ⊕ T) = PP `⊕ (~refl S ∷ (~refl T ∷ []))
 ~refl (` S ⇒ T) = PP `⇒ (~refl S ∷ (~refl T ∷ []))

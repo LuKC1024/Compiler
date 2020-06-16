@@ -13,19 +13,6 @@ open import Data.Nat
 open import Relation.Nullary
 open import Relation.Binary.PropositionalEquality
 
--- FFI
-
-FFI : Set
-FFI = ∃[ n ](Vec BaseTypeCode n × BaseTypeCode)
-
-FFI-op-agda : ∀ {n} → Vec BaseTypeCode n → BaseTypeCode → Set
-FFI-op-agda [] T = BaseValue T
-FFI-op-agda (S ∷ Ss) T = BaseValue S → FFI-op-agda Ss T
-
-FFI-gtlc : ∀ {n} → Vec BaseTypeCode n → BaseTypeCode → Type
-FFI-gtlc [] T = ` (′ T)
-FFI-gtlc (S ∷ Ss) T = ` ((` (′ S)) ⇒ FFI-gtlc Ss T)
-
 -- Value : Type → Set
 
 data Value : Type → Set
@@ -77,11 +64,9 @@ data EitherValue : Type → Type → Set where
 
 data ClosValue : Type → Type → Set where
 
-  prim : ∀ {n}
-    → (As : Vec BaseTypeCode (suc n))
-    → (B  : BaseTypeCode)
-    → (v : FFI-op-agda As B)
-    → ClosValue (` (′ head As)) (FFI-gtlc (tail As) B)
+  prim : ∀ {A T}
+    → (v : BaseValue A → Value T)
+    → ClosValue (` base A) T
     
   _,_ : ∀ {Γ S T}
     → (e : (Γ , S) ⊢ T)
@@ -94,25 +79,10 @@ data ClosValue : Type → Type → Set where
     → (d : Cast T₁ T₂)
     → ClosValue S₂ T₂
 
-PreValue (′ b) = BaseValue b
+PreValue (base b) = BaseValue b
 PreValue (S ⊗ T) = PairValue S T
 PreValue (S ⊕ T) = EitherValue S T
 PreValue (S ⇒ T) = ClosValue S T
-
-FFI-quote : ∀ {n} → (Ss : Vec BaseTypeCode n)(T : BaseTypeCode)
-  → FFI-op-agda Ss T
-  → Value (FFI-gtlc Ss T)
-FFI-quote []       B v = ` v
-FFI-quote (A ∷ As) B v = ` prim (A ∷ As) B v
-
-FFIConverter : Set
-FFIConverter = BaseTypeCode × Type
-
-FFIConverter-departure : FFIConverter → Type
-FFIConverter-departure (B , S) = (` S ⇒ (` (′ B)))
-
-FFIConverter-arrival : FFIConverter → Set
-FFIConverter-arrival (A , T) = BaseValue A → Value T
 
 data ErrorType : Set where
   blame : BlameLabel → BlameLabel → ErrorType
@@ -132,7 +102,7 @@ inject* : (S : Type)(l : BlameLabel)(v : Value S) → Value *
 inject* * l v = v
 inject* (` P) l v = inject P l v
 
-inject (′ b)   l (` v) = dyn l (` b) v
+inject (base b)   l (` v) = dyn l (` b) v
 inject (S ⊗ T) l (` v) = dyn l `⊗ (v ⟪ S ⟹[ l ] * ⊗ T ⟹[ l ] * ⟫)
 inject (S ⊕ T) l (` v) = dyn l `⊕ (v ⟪ S ⟹[ l ] * ⊕ T ⟹[ l ] * ⟫)
 -- inject (S ⊕ T) l (` inj₁ v) = dyn l `⊕ (inj₁ (inject* S l v))
@@ -147,15 +117,9 @@ project* v l (` P) = project v l P
 
 project (dyn lᵢ o₁ v) lₚ (o₂ , Ts) with o₁ ≟to o₂
 project (dyn lᵢ o₁ v) lₚ (o₂ , Ts) | no ¬p = error (blame lᵢ lₚ)
-project (dyn lᵢ (` b) v) lₚ (′ b)  | yes refl = just (` v)
+project (dyn lᵢ (` b) v) lₚ (base b)  | yes refl = just (` v)
 project (dyn lᵢ `⊗ v) lₚ (S ⊗ T) | yes refl = just (` (v ⟪ * ⟹[ lₚ ] S ⊗ * ⟹[ lₚ ] T ⟫))
 project (dyn lᵢ `⊕ v) lₚ (S ⊕ T) | yes refl = just (` (v ⟪ * ⟹[ lₚ ] S ⊕ * ⟹[ lₚ ] T ⟫))
--- project (dyn lᵢ `⊕ (inj₁ v)) lₚ (S ⊕ T) | yes refl = do
---   v ← project* v lₚ S
---   just (` (inj₁ v))
--- project (dyn lᵢ `⊕ (inj₂ v)) lₚ (S ⊕ T) | yes refl = do
---   v ← project* v lₚ T
---   just (` (inj₂ v))
 project (dyn lᵢ `⇒ v) lₚ (S ⇒ T) | yes refl = just (` (v ⟪ S ⟹[ lₚ ] * ⇒ * ⟹[ lₚ ] T ⟫))
 
 
@@ -195,7 +159,7 @@ do-app : ∀ {Z S T}
   → (a : Value S)
   → (s : RtCast T Z)
   → Error (Value Z)
-do-app gas (prim (A ∷ As) B f) (` a) s = s (FFI-quote As B (f a))
+do-app gas (prim f)  (` a) s = s (f a)
 do-app gas (e , ρ)       a s = eval gas e (a ∷ ρ) s -- eval gas e (a ∷ ρ) s
 do-app gas (f ⟪ c ⇒ d ⟫) a s = do
   v ← ⟦ c ⟧ a
@@ -263,36 +227,37 @@ eval (suc gas) (which e e₁ e₂) ρ s = do
   ` v ← eval gas e ρ just
   do-which gas v just e₁ just e₂ ρ s
 
-_ : let ρ = (` prim (nat ∷ nat ∷ []) nat _+_ ∷ [])
-        e = (app (app (var zero) (lit 2)) (lit 3))
-    in
-      eval 1024 e ρ just ≡ just (` 5)
-_ = refl
+FFI-set : ∀ {n} → Vec BaseTypeCode n → BaseTypeCode → Set
+FFI-set [] B = BaseValue B
+FFI-set (A ∷ As) B = BaseValue A → FFI-set As B
 
-_ : let ρ = ((FFI-quote (nat ∷ nat ∷ []) nat _*_) ∷
-             (FFI-quote (nat ∷ nat ∷ []) nat _∸_) ∷ [])
-        e = (app (app (var zero) (lit 2)) (lit 3))
-    in
-      eval {Γ = ((∅ , _) , _)} 1024 e ρ just ≡ just (` 6)
-_ = refl
+FFI-set* : ∀ {n} → Vec BaseTypeCode n → Type → Set
+FFI-set* [] B = Value B
+FFI-set* (A ∷ As) B = BaseValue A → FFI-set* As B
+
+FFI-type : ∀ {n} → Vec BaseTypeCode n → Type → Type
+FFI-type [] T = T
+FFI-type (A ∷ As) T = (` (` base A) ⇒ FFI-type As T)
+
+FFI-quote : ∀ {n} → (As : Vec BaseTypeCode n)(B : BaseTypeCode)(v : FFI-set As B) → Value (FFI-type As (` base B))
+FFI-quote [] B v = ` v
+FFI-quote (A ∷ As) B v = ` prim (λ a → FFI-quote As B (v a))
+
+FFI-quote* : ∀ {n} → (As : Vec BaseTypeCode n)(B : Type)(v : FFI-set* As B) → Value (FFI-type As B)
+FFI-quote* [] B v = v
+FFI-quote* (A ∷ As) B v = ` prim (λ a → FFI-quote* As B (v a))
+
+case-ℕ : ℕ →  Value (` (` unit) ⊕ (` nat))
+case-ℕ zero    = ` inj₁ (` tt)
+case-ℕ (suc n) = ` inj₂ (` n)
 
 postulate ℓ : BlameLabel
 
 Dyn : Type
 Dyn = *
 
-Nat : Type
-Nat = ` (` (′ unit)) ⊕ *
-
-add1 : ∀ {Γ} → Γ ⊢ (` Nat ⇒ Nat)
-add1 = fun _ _ (inj₂ (var zero ⟨ Nat ⟹[ ℓ ] * ⟩))
-
-ℕ→Nat : BlameLabel → ℕ → Value Nat
-ℕ→Nat l zero    = ` (inj₁ (` tt))
-ℕ→Nat l (suc n) = ` (inj₂ (inject _ l (ℕ→Nat l n)))
-
-self-app : ∀ {Γ} → Γ ⊢ (` Dyn ⇒ Dyn)
-self-app = fun Dyn Dyn (app (var zero ⟨ * ⟹[ ℓ ] (` Dyn ⇒ Dyn) ⟩) (var zero))
+self-app : ∀ {Γ} → Γ ⊢ (` * ⇒ *)
+self-app = fun _ _ (app (var zero ⟨ * ⟹[ ℓ ] (` * ⇒ *) ⟩) (var zero))
 
 Z : {A B : Type}{Γ : Context} → Γ ⊢ (` (` (` A ⇒ B) ⇒ (` A ⇒ B)) ⇒ (` A ⇒ B))
 Z {A} {B}
@@ -308,80 +273,21 @@ Z {A} {B}
                ⟨ _ ⟹[ ℓ ] * ⟩))
          ⟨ * ⟹[ ℓ ] (` A ⇒ B) ⟩)
 
-observe : ∀ {Γ} → Γ ⊢ (` (` (` (′ nat)) ⇒ (` (′ nat))) ⇒ (` Nat ⇒ (` (′ nat))))
-observe = fun _ _ -- add1
-           (app Z (fun _ _ -- rec
-                   (fun Nat (` (′ nat)) -- n
-                     (which (var zero)
-                       -- _
-                       {- 0 -}
-                       (lit 0)
-                       -- n-1
-                       {- (add1 (rec n-1)) -}
-                       (app (var (suc (suc (suc zero))))
-                            (app (var (suc (suc zero)))
-                                 (var zero ⟨ * ⟹[ ℓ ] Nat ⟩))))))
-            ⟨ _ ⟹[ ℓ ] (` Nat ⇒ (` (′ nat))) ⟩)
-
-_ : let ρ = (` prim (nat ∷ []) nat (1 +_)) ∷ (ℕ→Nat ℓ 4) ∷ []
-        e = app (app observe (var zero)) (var (suc zero))
-    in
-      eval {Γ = (∅ , Nat) , (FFI-gtlc (nat ∷ []) nat)} 999 e ρ just ≡ just (` 4)
-_ = refl
-
-plus : ∀ {Γ} → Γ ⊢ (` Nat ⇒ (` Nat ⇒ Nat))
-plus
-  = (app Z (fun _ _ -- +
-             (fun _ _ -- n₁
-               (fun _ _ -- n₂
-                 (which (var (suc zero))
-                   -- _
-                   (var (suc zero))
-                   -- n₁-1
-                   (app add1
-                     (app (app (var (suc (suc (suc zero))))
-                               (var zero ⟨ * ⟹[ ℓ ] Nat ⟩))
-                          (var (suc zero)))))))))
-
-times : ∀ {Γ} → Γ ⊢ (` Nat ⇒ (` Nat ⇒ Nat))
-times
-  = (app Z (fun _ _ -- +
-             (fun _ _ -- n₁
-               (fun _ _ -- n₂
-                 (which (var (suc zero))
-                   -- _
-                   (inj₁ (lit tt))
-                   -- n₁-1
-                   {- (+ n₂ (rec n₁-1 n₂)) -}
-                   (app (app plus (var (suc zero)))
-                        (app (app (var (suc (suc (suc zero))))
-                                  (var zero ⟨ * ⟹[ ℓ ] Nat ⟩))
-                             (var (suc zero)))))))))
-
-factorial : ∀ {Γ} → Γ ⊢ (` Nat ⇒ Nat)
-factorial
-  = (app Z (fun _ _ -- !
-             (fun _ _ -- n
-               (which (var zero)
-                 -- _
-                 (app add1 (inj₁ (lit tt)))
-                 -- n₁-1
-                 {- (* (add1 n₁-1) (rec n₁-1)) -}
-                 (app (app times (app add1 (var zero ⟨ * ⟹[ ℓ ] Nat ⟩)))
-                      (app (var (suc (suc zero)))
-                           (var zero ⟨ * ⟹[ ℓ ] Nat ⟩)))))))
-
-_ : let ρ = (` prim (nat ∷ []) nat (1 +_)) ∷ (ℕ→Nat ℓ 2) ∷ (ℕ→Nat ℓ 3) ∷ []
-        e = (app (app observe (var zero))
-                 (app (app plus (var (suc zero))) (var (suc (suc zero)))))
-    in
-      {- (+ 2 3) ≡ 5 -}
-      eval 999999 e ρ just ≡ just (` 5)
-_ = refl
-
-_ : let ρ = (` prim (nat ∷ []) nat (1 +_)) ∷ (ℕ→Nat ℓ 5) ∷ (ℕ→Nat ℓ 0) ∷ []
-        e = (app (app observe (var zero))
-                 (app factorial (var (suc zero))))
+_ : let ρ = ((FFI-quote (`nat ∷ `nat ∷ []) `nat _*_)    ∷
+             (FFI-quote (`nat ∷ [])        `nat (_+ 1)) ∷
+             (FFI-quote* (`nat ∷ []) _ case-ℕ) ∷  [])
+        e = app (fun _ _ (app (var zero) (lit 5)))
+                -- fact
+                (app Z (fun _ _ -- fact
+                         (fun _ _ -- n
+                           (which (app (var (suc (suc (suc (suc zero))))) (var zero))
+                             -- _
+                             (lit 1)
+                             -- n-1
+                             (app (app (var (suc (suc (suc zero))))
+                                       (app (var (suc (suc zero)))
+                                            (var zero)))
+                                  (app (var (suc (suc (suc (suc zero))))) (var zero)))))))
     in
       {- (factorial 5) ≡ 120 -}
       eval 999999 e ρ just ≡ just (` 120)

@@ -13,7 +13,7 @@ data _⊢_ : Context → Type → Set where
 
   lit : ∀ {Γ B}
     → (v : BaseValue B)
-    → Γ ⊢ (` (′ B))
+    → Γ ⊢ (` (base B))
                       
   var : ∀ {Γ T}
     → (x : Γ ∋ T)
