@@ -34,7 +34,7 @@
            parse))
 
 
-#; ;; factorial 5
+;; factorial 5
 (compile '(let ([f (lambda (f)
                      (lambda (n)
                        (if (= n 0)
